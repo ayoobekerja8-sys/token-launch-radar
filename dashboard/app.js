@@ -29,6 +29,12 @@
     return '$' + Math.round(value);
   }
 
+  function chainSummary(chains) {
+    var shown = chains.slice(0, 3);
+    if (chains.length > 3) shown.push('+' + (chains.length - 3));
+    return shown.join(', ');
+  }
+
   function calc(row) {
     var growth = 1 + state.weight * Math.tanh(Math.max(-80, Math.min(200, row.change_7d || 0)) / 30);
     var age = row.age_days == null ? 365 : row.age_days;
@@ -101,7 +107,7 @@
           <thead><tr><th>Rank</th><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>7d</th><th>Age</th><th>Implied</th><th>Multiple</th></tr></thead>
           <tbody>${shown.map(row => `
             <tr data-slug="${esc(row.slug)}"><td>${row.rank}</td><td>${esc(row.name)}</td><td>${esc(row.category)}</td>
-            <td>${esc(row.chains.join(', '))}</td><td>${money(row.tvl_usd)}</td>
+            <td>${esc(chainSummary(row.chains))}</td><td>${money(row.tvl_usd)}</td>
             <td>${row.change_7d == null ? '—' : row.change_7d.toFixed(1) + '%'}</td>
             <td>${row.age_days == null ? 'unknown' : row.age_days + 'd'}</td>
             <td class="amber">${money(calc(row))}</td><td>${row.multiple.toFixed(3)}×</td></tr>`).join('')}
@@ -115,7 +121,7 @@
         <div class="scroll"><table class="live">
           <thead><tr><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>Market value</th></tr></thead>
           <tbody>${D.live.map(row => `
-            <tr><td>${esc(row.name)}</td><td>${esc(row.category)}</td><td>${esc(row.chains.join(', '))}</td>
+            <tr><td>${esc(row.name)}</td><td>${esc(row.category)}</td><td>${esc(chainSummary(row.chains))}</td>
             <td>${money(row.tvl_usd)}</td><td>${money(row.mcap_usd)}</td></tr>`).join('')}
           </tbody>
         </table></div>
