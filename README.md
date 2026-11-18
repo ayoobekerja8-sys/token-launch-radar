@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/token-radar-01/ayoobekerja8-sys/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/ayoobekerja8-sys/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-A token launch radar: it reads a sealed snapshot of DeFi protocols, scores every protocol that records no token yet by the implied value of the token it might one day issue, and shows a reader how to farm each one before it launches. The board ranks pre-token protocols by implied value — derived from TVL, seven-day growth, age without a token, and chain breadth — and keeps the protocols whose token already trades in a separate live view.
+A snapshot-only token launch radar with a dark terminal board, protocol detail and six-step farm plans. It ranks the complete watchlist plus every rankable pre-token protocol below the TVL floor; protocols with a token already trading are kept in a separate live market-cap table. Each pre-token row uses the same name-agnostic radar-2 function: `max(1, round(C × TVL^0.85 × growth × maturity × breadth))`. Calibration `C` makes a neutral $1bn TVL, one-year, one-chain protocol imply about $250m. Seven-day growth is clamped to −60%/+120% with asymmetric downside weight; maturity rises quickly from a 0.55 floor and saturates at four years; chain breadth adds a small capped premium. The dashboard exposes each factor, sortable columns and category/chain/search/watchlist filters, plus a local slider sandbox that re-ranks the embedded snapshot without network access.
 
 ## Run it
 
