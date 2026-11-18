@@ -42,8 +42,16 @@ if (!existsSync(inputFile)) {
 }
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
-const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, radar } = buildRadar(snapshot);
+let snapshot;
+let built;
+try {
+  snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
+  built = buildRadar(snapshot);
+} catch (error) {
+  process.stderr.write(`token radar: ${error instanceof Error ? error.message : 'could not read snapshot'}\n`);
+  process.exit(1);
+}
+const { board, radar } = built;
 const issue = boardIssue(board, snapshot);
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
