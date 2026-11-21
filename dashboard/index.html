@@ -1,1 +1,113 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Token Radar · radar-3</title><link rel="stylesheet" href="app.css"></head><body><main id="app"><script src="../data.js"></script><script src="app.js"></script></main></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Token Radar — pre-token value radar</title>
+    <link rel="stylesheet" href="app.css">
+  </head>
+  <body>
+    <div class="page">
+      <header class="masthead">
+        <div class="masthead-text">
+          <p class="eyebrow">TOKEN RADAR / <span id="model-version">radar-3</span></p>
+          <h1>Pre-token value radar</h1>
+          <p class="subtitle" id="subtitle">Snapshot — · snapshot-derived estimates</p>
+        </div>
+        <p class="masthead-note">RECORDS NO TOKEN · NOT PROOF OF NO TOKEN</p>
+      </header>
+
+      <section class="card explainer">
+        <div class="explainer-head">
+          <h2>How to read this radar</h2>
+          <p class="formula" id="formula-line">
+            implied value = TVL × category comparable multiple × growth factor × maturity factor
+          </p>
+        </div>
+        <div class="explainer-grid">
+          <div>
+            <h3>Comparable multiple</h3>
+            <p>Token market cap ÷ TVL medians by category, shrunk toward the global median 0.246.</p>
+          </div>
+          <div>
+            <h3>Growth factor</h3>
+            <p>1 + 0.45 × tanh(change ÷ 30), so a hot week helps without dominating.</p>
+          </div>
+          <div>
+            <h3>Maturity factor</h3>
+            <p>Rises with the days run without a recorded token, toward 1 for long-running protocols.</p>
+          </div>
+        </div>
+        <div class="explainer-foot">
+          <p class="calibration">
+            <span class="calibration-tag">Calibration</span>
+            $1B TVL Lending, flat growth, age 481 days → about $164M.
+          </p>
+          <p class="caveat">
+            “Records no token” describes DefiLlama's record and is never proof that a protocol has no token.
+          </p>
+        </div>
+      </section>
+
+      <section class="stats" id="stats" aria-label="Board statistics"></section>
+
+      <section class="card controls" aria-label="Filters">
+        <label class="field field-search">
+          <span class="field-label">Search</span>
+          <input id="search" type="search" placeholder="Name or slug" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field">
+          <span class="field-label">Category</span>
+          <select id="category"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Chain</span>
+          <select id="chain"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Sort</span>
+          <select id="sort">
+            <option value="implied">Implied value</option>
+            <option value="tvl">TVL</option>
+            <option value="change">7-day change</option>
+            <option value="age">Age</option>
+            <option value="multiple">Multiple</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="watch-only" type="checkbox">
+          <span>Watchlist only</span>
+        </label>
+        <p class="row-count" id="row-count">0 rows</p>
+      </section>
+
+      <main id="board" class="board">
+        <table class="radar">
+          <thead>
+            <tr>
+              <th class="col-rank" scope="col">Rank</th>
+              <th class="col-name" scope="col">Protocol</th>
+              <th scope="col">Category</th>
+              <th scope="col">Chains</th>
+              <th class="num" scope="col">TVL</th>
+              <th class="num" scope="col">7d</th>
+              <th class="num" scope="col">Age</th>
+              <th class="num" scope="col">Implied</th>
+              <th class="num" scope="col">Multiple</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p class="empty" id="empty" hidden>No protocols match these filters.</p>
+      </main>
+
+      <footer class="colophon" id="colophon"></footer>
+    </div>
+
+    <div class="scrim" id="scrim" hidden></div>
+    <aside class="panel" id="detail" aria-labelledby="detail-name" hidden></aside>
+
+    <script src="../data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

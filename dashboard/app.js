@@ -1,206 +1,555 @@
 (function () {
   'use strict';
 
-  var D = window.RADAR;
-  if (!D) return;
+  var DATA = window.RADAR || {};
+  var ROWS = Array.isArray(DATA.rows) ? DATA.rows : [];
+  var WATCH = Array.isArray(DATA.watchlist) ? DATA.watchlist : [];
+  var MODEL = DATA.model || {};
+  var GLOBAL = typeof MODEL.global_median === 'number' ? MODEL.global_median : 0.246;
+  var WATCH_SET = new Set(WATCH);
+  var LIVE = Array.isArray(DATA.live) ? DATA.live : [];
 
-  var root = document.getElementById('app');
-  var state = {
-    q: '', cat: 'all', chain: 'all', watch: false,
-    sort: 'implied', weight: 0.45, floor: 0.70,
+  var els = {
+    board: document.getElementById('rows'),
+    empty: document.getElementById('empty'),
+    count: document.getElementById('row-count'),
+    search: document.getElementById('search'),
+    category: document.getElementById('category'),
+    chain: document.getElementById('chain'),
+    sort: document.getElementById('sort'),
+    watch: document.getElementById('watch-only'),
+    stats: document.getElementById('stats'),
+    subtitle: document.getElementById('subtitle'),
+    version: document.getElementById('model-version'),
+    colophon: document.getElementById('colophon'),
+    panel: document.getElementById('detail'),
+    scrim: document.getElementById('scrim')
   };
-  var rows = D.rows;
-  var cats = Array.from(new Set(rows.map(r => r.category || 'Unknown'))).sort();
-  var chains = Array.from(new Set(rows.flatMap(r => r.chains))).sort();
-  var watch = new Set(D.watchlist || []);
 
-  // Shared formatting and model preview helpers.
-  function esc(value) {
-    return String(value == null ? '—' : value).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  var state = {
+    q: '',
+    category: '',
+    chain: '',
+    sort: 'implied',
+    watchOnly: false,
+    detail: null
+  };
+
+  function round(n, digits) {
+    var f = Math.pow(10, digits);
+    return Math.round(n * f) / f;
+  }
+
+  function money(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '—';
+    var a = Math.abs(n);
+    if (a >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+    return '$' + Math.round(n);
+  }
+
+  function pct(v) {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    return v.toFixed(1) + '%';
+  }
+
+  function age(v) {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    return Math.round(v) + 'd';
+  }
+
+  function mult(v) {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    return v.toFixed(3) + '×';
+  }
+
+  function chainList(list) {
+    if (!Array.isArray(list) || list.length === 0) return '—';
+    if (list.length <= 3) return list.join(', ');
+    return list.slice(0, 3).join(', ') + ', +' + (list.length - 3);
+  }
+
+  function categoryOf(row) {
+    return row.category || 'Uncategorised';
+  }
+
+  function sortedUnique(values) {
+    return Array.from(new Set(values)).sort(function (a, b) {
+      return a.localeCompare(b);
     });
   }
 
-  function money(value) {
-    if (value == null) return '—';
-    if (value >= 1e9) return '$' + (value / 1e9).toFixed(2) + 'B';
-    if (value >= 1e6) return '$' + (value / 1e6).toFixed(1) + 'M';
-    if (value >= 1e3) return '$' + Math.round(value / 1e3) + 'K';
-    return '$' + Math.round(value);
-  }
+  /* ---------- header, stats, filters ---------- */
 
-  function chainSummary(chains) {
-    var shown = chains.slice(0, 3);
-    if (chains.length > 3) shown.push('+' + (chains.length - 3));
-    return shown.join(', ');
-  }
-
-  function calc(row) {
-    var growth = 1 + state.weight * Math.tanh(Math.max(-80, Math.min(200, row.change_7d || 0)) / 30);
-    var age = row.age_days == null ? 365 : row.age_days;
-    var maturity = Math.max(state.floor, Math.min(1,
-      state.floor + (1 - state.floor) * Math.log(1 + age) / Math.log(1461)));
-    return Math.max(1, Math.round(row.tvl_usd * row.multiple * growth * maturity));
-  }
-
-  // Filter and sort the ranked board.
-  function options(items, value) {
-    return '<option value="all">All</option>' + items.map(item =>
-      '<option ' + (value === item ? 'selected' : '') + '>' + esc(item) + '</option>'
-    ).join('');
-  }
-
-  function visible() {
-    return rows.filter(row =>
-      (!state.q || (row.name + ' ' + row.slug).toLowerCase().includes(state.q.toLowerCase())) &&
-      (state.cat === 'all' || (row.category || 'Unknown') === state.cat) &&
-      (state.chain === 'all' || row.chains.includes(state.chain)) &&
-      (!state.watch || watch.has(row.slug))
-    ).sort(function (a, b) {
-      var score = state.sort === 'implied' ? calc(a) - calc(b) :
-        state.sort === 'tvl' ? a.tvl_usd - b.tvl_usd :
-          state.sort === 'change' ? (a.change_7d || 0) - (b.change_7d || 0) :
-            (a.age_days || 0) - (b.age_days || 0);
-      return -score || a.slug.localeCompare(b.slug);
-    });
-  }
-
-  // Dashboard sections: explainer, stats, controls, ranked board, live table and sandbox.
-  function render() {
-    var search = document.getElementById('q');
-    var restoreSearch = !!search && document.activeElement === search;
-    var caret = restoreSearch ? search.selectionEnd : 0;
-    var shown = visible();
-    var median = D.model.global_median;
-
-    var explainer = `
-      <section class="card">
-        <h2>How to read this radar</h2>
-        <p>Implied value = TVL × category comparable multiple × growth factor × maturity factor. Category multiples use token mcap/TVL medians, shrunk toward the global median (${median.toFixed(3)}). Growth uses 1 + 0.45 × tanh(change ÷ 30); maturity rises with age toward 1. Calibration: $1B TVL Lending, flat growth, age 481 days → about $164M.</p>
-        <p>“Records no token” describes DefiLlama’s record; it is never proof that a protocol has no token.</p>
-      </section>`;
-    var stats = `
-      <section class="card stats">
-        <div class="stat"><span class="muted">Board rows</span><b>${rows.length}</b></div>
-        <div class="stat"><span class="muted">Watchlist covered</span><b>${D.watchlist_size}/${D.watchlist_size}</b></div>
-        <div class="stat"><span class="muted">Median comparable</span><b>${median.toFixed(3)}×</b></div>
-        <div class="stat"><span class="muted">As of</span><b>${esc(D.as_of)}</b></div>
-      </section>`;
-    var controls = `
-      <section class="card controls">
-        <label>Search<input id="q" value="${esc(state.q)}" placeholder="Name or slug"></label>
-        <label>Category<select id="cat">${options(cats, state.cat)}</select></label>
-        <label>Chain<select id="chain">${options(chains, state.chain)}</select></label>
-        <label>Sort<select id="sort">
-          <option value="implied" ${state.sort === 'implied' ? 'selected' : ''}>Implied value</option>
-          <option value="tvl" ${state.sort === 'tvl' ? 'selected' : ''}>TVL</option>
-          <option value="change" ${state.sort === 'change' ? 'selected' : ''}>7-day change</option>
-          <option value="age" ${state.sort === 'age' ? 'selected' : ''}>Age</option>
-        </select></label>
-        <label><span>Watchlist only</span><input id="watch" type="checkbox" ${state.watch ? 'checked' : ''}></label>
-        <span class="muted">${shown.length} rows</span>
-      </section>`;
-    var board = `
-      <section class="card">
-        <h2>Ranked board</h2>
-        <div class="scroll"><table>
-          <thead><tr><th>Rank</th><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>7d</th><th>Age</th><th>Implied</th><th>Multiple</th></tr></thead>
-          <tbody>${shown.map(row => `
-            <tr data-slug="${esc(row.slug)}"><td>${row.rank}</td><td>${esc(row.name)}</td><td>${esc(row.category)}</td>
-            <td>${esc(chainSummary(row.chains))}</td><td>${money(row.tvl_usd)}</td>
-            <td>${row.change_7d == null ? '—' : row.change_7d.toFixed(1) + '%'}</td>
-            <td>${row.age_days == null ? 'unknown' : row.age_days + 'd'}</td>
-            <td class="amber">${money(calc(row))}</td><td>${row.multiple.toFixed(3)}×</td></tr>`).join('')}
-          </tbody>
-        </table></div>
-      </section>`;
-    var live = `
-      <section class="card">
-        <h2>Already trading</h2>
-        <p>Market capitalization from the snapshot; these rows are not model-ranked.</p>
-        <div class="scroll"><table class="live">
-          <thead><tr><th>Protocol</th><th>Category</th><th>Chains</th><th>TVL</th><th>Market value</th></tr></thead>
-          <tbody>${D.live.map(row => `
-            <tr><td>${esc(row.name)}</td><td>${esc(row.category)}</td><td>${esc(chainSummary(row.chains))}</td>
-            <td>${money(row.tvl_usd)}</td><td>${money(row.mcap_usd)}</td></tr>`).join('')}
-          </tbody>
-        </table></div>
-      </section>`;
-    var sandbox = `
-      <section class="card">
-        <h2>Model sandbox · what-if preview</h2>
-        <p>Preview recalculates displayed implied values. It does not change board.json.</p>
-        <div class="sandbox">
-          <label>Growth weight: <output id="wo">${state.weight.toFixed(2)}</output><input id="weight" type="range" min="0" max="0.8" step="0.01" value="${state.weight}"></label>
-          <label>Maturity floor: <output id="fo">${state.floor.toFixed(2)}</output><input id="floor" type="range" min="0.5" max="0.9" step="0.01" value="${state.floor}"></label>
-        </div>
-      </section>`;
-
-    root.innerHTML = `
-      <header><div><div class="eyebrow">TOKEN RADAR / ${esc(D.model_version)}</div>
-        <h1>Pre-token value radar</h1><p>Snapshot ${esc(D.as_of)} · snapshot-derived estimates</p></div>
-        <div class="tag">RECORDS NO TOKEN · NOT PROOF OF NO TOKEN</div></header>
-      ${explainer}${stats}${controls}${board}${live}${sandbox}
-      ${location.hash.indexOf('#/detail/') === 0 ? detail(decodeURIComponent(location.hash.slice(9))) : ''}`;
-    bind();
-    if (restoreSearch) {
-      var nextSearch = document.getElementById('q');
-      nextSearch.focus();
-      nextSearch.setSelectionRange(caret, caret);
+  function renderHead() {
+    if (els.version) els.version.textContent = DATA.model_version || 'radar-3';
+    if (els.subtitle) {
+      els.subtitle.textContent =
+        'Snapshot ' + (DATA.as_of || '—') + ' · snapshot-derived estimates';
     }
   }
 
-  // Detail section: implied value, real factors with normalized bars, and farm steps.
-  function detail(slug) {
-    var row = rows.find(item => item.slug === slug);
-    if (!row) return '';
-    var factors = [
-      ['Comparable multiple', row.multiple, row.multiple / 1.5],
-      ['Growth factor', row.growth_multiplier, Math.max(0, Math.min(1, (row.growth_multiplier - 0.55) / 0.90))],
-      ['Maturity factor', row.maturity_multiplier, Math.max(0, Math.min(1, (row.maturity_multiplier - 0.70) / 0.30))],
+  function counts() {
+    var covered = 0;
+    for (var i = 0; i < WATCH.length; i += 1) {
+      for (var j = 0; j < ROWS.length; j += 1) {
+        if (ROWS[j].slug === WATCH[i]) {
+          covered += 1;
+          break;
+        }
+      }
+    }
+    return covered;
+  }
+
+  function renderStats() {
+    if (!els.stats) return;
+    var covered = counts();
+    var figures = [
+      { label: 'Board rows', value: String(ROWS.length), accent: false, unit: DATA.early_size ? DATA.early_size + ' early stage' : '' },
+      { label: 'Watchlist covered', value: covered + '/' + WATCH.length, accent: true, unit: 'every protocol on the list' },
+      { label: 'Median comparable', value: GLOBAL.toFixed(3) + '×', accent: false, unit: 'market cap ÷ TVL, shrunk' },
+      { label: 'As of', value: DATA.as_of || '—', accent: false, unit: 'dated snapshot' }
     ];
-    return `
-      <aside class="detail">
-        <button id="close">Close</button><h2>${esc(row.name)}</h2>
-        <p class="amber"><strong>Implied value ${money(row.implied_value_usd)}</strong></p>
-        <p>${esc(row.category)} · ${esc(row.chains.join(', '))}</p>
-        <p>TVL ${money(row.tvl_usd)} · Age ${row.age_days == null ? 'unknown' : row.age_days + ' days'}</p>
-        <h3>Factor breakdown</h3>
-        ${factors.map(factor => `
-          <p>${esc(factor[0])} <b>${Number(factor[1]).toFixed(3)}</b></p>
-          <div class="bar"><i style="width:${Math.max(0, Math.min(100, factor[2] * 100))}%"></i></div>`).join('')}
-        <h3>Six step farm plan</h3>
-        <ol>${row.farm_steps.map(step => `<li class="step">${esc(step)}</li>`).join('')}</ol>
-      </aside>`;
-  }
-
-  // Event bindings and hash routing.
-  function bind() {
-    document.getElementById('q').oninput = event => { state.q = event.target.value; render(); };
-    document.getElementById('cat').onchange = event => {
-      state.cat = event.target.value;
-      location.hash = state.cat === 'all' ? '#/' : '#/?category=' + encodeURIComponent(state.cat);
-      render();
-    };
-    document.getElementById('chain').onchange = event => { state.chain = event.target.value; render(); };
-    document.getElementById('sort').onchange = event => { state.sort = event.target.value; render(); };
-    document.getElementById('watch').onchange = event => { state.watch = event.target.checked; render(); };
-    document.getElementById('weight').oninput = event => { state.weight = +event.target.value; render(); };
-    document.getElementById('floor').oninput = event => { state.floor = +event.target.value; render(); };
-    Array.from(document.querySelectorAll('tbody tr[data-slug]')).forEach(row => {
-      row.onclick = () => { location.hash = '#/detail/' + encodeURIComponent(row.dataset.slug); };
+    els.stats.textContent = '';
+    figures.forEach(function (fig) {
+      var box = document.createElement('div');
+      box.className = 'stat';
+      var label = document.createElement('p');
+      label.className = 'stat-label';
+      label.textContent = fig.label;
+      var value = document.createElement('p');
+      value.className = 'stat-value' + (fig.accent ? ' accent' : '');
+      value.textContent = fig.value;
+      var unit = document.createElement('p');
+      unit.className = 'stat-unit';
+      unit.textContent = fig.unit;
+      box.appendChild(label);
+      box.appendChild(value);
+      box.appendChild(unit);
+      els.stats.appendChild(box);
     });
-    var close = document.getElementById('close');
-    if (close) close.onclick = () => { location.hash = '#/'; };
   }
 
-  function route() {
-    var hash = location.hash;
-    if (hash.indexOf('#/?category=') === 0) state.cat = decodeURIComponent(hash.slice(12));
-    else if (hash === '#/' || hash === '#') state.cat = 'all';
-    render();
+  function fillSelect(select, values, allLabel) {
+    if (!select) return;
+    select.textContent = '';
+    var all = document.createElement('option');
+    all.value = '';
+    all.textContent = allLabel;
+    select.appendChild(all);
+    values.forEach(function (value) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
   }
 
-  window.addEventListener('hashchange', route);
-  route();
+  function renderFilters() {
+    var categories = sortedUnique(ROWS.map(categoryOf));
+    var chains = sortedUnique(
+      ROWS.reduce(function (acc, row) {
+        return acc.concat(Array.isArray(row.chains) ? row.chains : []);
+      }, [])
+    );
+    fillSelect(els.category, categories, 'All categories');
+    fillSelect(els.chain, chains, 'All chains');
+  }
+
+  /* ---------- filtering and sorting ---------- */
+
+  function matches(row) {
+    if (state.watchOnly && !WATCH_SET.has(row.slug)) return false;
+    if (state.category && categoryOf(row) !== state.category) return false;
+    if (state.chain && (row.chains || []).indexOf(state.chain) === -1) return false;
+    if (state.q) {
+      var needle = state.q.toLowerCase();
+      var name = String(row.name || '').toLowerCase();
+      var slug = String(row.slug || '').toLowerCase();
+      if (name.indexOf(needle) === -1 && slug.indexOf(needle) === -1) return false;
+    }
+    return true;
+  }
+
+  function valueFor(row) {
+    switch (state.sort) {
+      case 'tvl':
+        return row.tvl_usd;
+      case 'change':
+        return row.change_7d;
+      case 'age':
+        return row.age_days;
+      case 'multiple':
+        return row.multiple;
+      default:
+        return row.implied_value_usd;
+    }
+  }
+
+  function compare(a, b) {
+    var av = valueFor(a);
+    var bv = valueFor(b);
+    var aMissing = av === null || av === undefined || !isFinite(av);
+    var bMissing = bv === null || bv === undefined || !isFinite(bv);
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    if (!aMissing && av !== bv) return bv - av;
+    if (a.implied_value_usd !== b.implied_value_usd) {
+      return b.implied_value_usd - a.implied_value_usd;
+    }
+    return a.rank - b.rank;
+  }
+
+  function visibleRows() {
+    return ROWS.filter(matches).sort(compare);
+  }
+
+  /* ---------- table ---------- */
+
+  function cell(text, className, tag) {
+    var td = document.createElement(tag || 'td');
+    if (className) td.className = className;
+    td.textContent = text;
+    return td;
+  }
+
+  function buildRow(row) {
+    var tr = document.createElement('tr');
+    tr.className = 'row';
+    tr.tabIndex = 0;
+    tr.setAttribute('role', 'button');
+    tr.setAttribute('aria-label', 'Show details for ' + row.name);
+    tr.dataset.slug = row.slug;
+
+    tr.appendChild(cell(String(row.rank), 'rank mono'));
+
+    var nameCell = document.createElement('td');
+    nameCell.className = 'name';
+    nameCell.textContent = row.name;
+    var slug = document.createElement('span');
+    slug.className = 'slug';
+    slug.textContent = row.slug;
+    nameCell.appendChild(slug);
+    tr.appendChild(nameCell);
+
+    tr.appendChild(cell(categoryOf(row), 'cat'));
+    tr.appendChild(cell(chainList(row.chains), 'chains'));
+    tr.appendChild(cell(money(row.tvl_usd), 'num mono'));
+
+    var changeCell = cell(pct(row.change_7d), 'num mono dim');
+    if (typeof row.change_7d === 'number') {
+      changeCell.className = 'num mono ' + (row.change_7d >= 0 ? 'pos' : 'neg');
+    }
+    tr.appendChild(changeCell);
+
+    tr.appendChild(cell(age(row.age_days), 'num mono dim'));
+    tr.appendChild(cell(money(row.implied_value_usd), 'num implied'));
+    tr.appendChild(cell(mult(row.multiple), 'num multiple'));
+
+    tr.addEventListener('click', function () {
+      openDetail(row.slug, true);
+    });
+    tr.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openDetail(row.slug, true);
+      }
+    });
+
+    return tr;
+  }
+
+  function renderBoard() {
+    var rows = visibleRows();
+    if (!els.board) return;
+    els.board.textContent = '';
+    var frag = document.createDocumentFragment();
+    rows.forEach(function (row) {
+      frag.appendChild(buildRow(row));
+    });
+    els.board.appendChild(frag);
+    if (els.count) {
+      els.count.textContent = rows.length + (rows.length === 1 ? ' row' : ' rows');
+    }
+    if (els.empty) els.empty.hidden = rows.length !== 0;
+  }
+
+  /* ---------- detail panel ---------- */
+
+  function findRow(slug) {
+    for (var i = 0; i < ROWS.length; i += 1) {
+      if (ROWS[i].slug === slug) return ROWS[i];
+    }
+    return null;
+  }
+
+  function factorBlock(name, value, note, kind, scale) {
+    var wrap = document.createElement('div');
+    wrap.className = 'factor';
+
+    var top = document.createElement('div');
+    top.className = 'factor-top';
+    var label = document.createElement('span');
+    label.className = 'factor-name';
+    label.textContent = name;
+    var val = document.createElement('span');
+    val.className = 'factor-value';
+    val.textContent = value.toFixed(3);
+    top.appendChild(label);
+    top.appendChild(val);
+
+    var bar = document.createElement('div');
+    bar.className = 'factor-bar';
+    var fill = document.createElement('div');
+    fill.className = 'factor-fill' + (kind ? ' ' + kind : '');
+    var width = Math.max(2, Math.min(100, (value / scale) * 100));
+    fill.style.width = width + '%';
+    bar.appendChild(fill);
+
+    var noteEl = document.createElement('p');
+    noteEl.className = 'factor-note';
+    noteEl.textContent = note;
+
+    wrap.appendChild(top);
+    wrap.appendChild(bar);
+    wrap.appendChild(noteEl);
+    return wrap;
+  }
+
+  function renderDetail(row) {
+    var panel = els.panel;
+    if (!panel) return;
+    panel.textContent = '';
+
+    var head = document.createElement('div');
+    head.className = 'panel-head';
+    var title = document.createElement('h2');
+    title.id = 'detail-name';
+    title.textContent = row.name;
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'close';
+    close.textContent = 'Close';
+    close.addEventListener('click', function () {
+      closeDetail();
+    });
+    head.appendChild(title);
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    var implied = document.createElement('p');
+    implied.className = 'panel-implied';
+    var impliedLabel = document.createElement('span');
+    impliedLabel.className = 'panel-implied-label';
+    impliedLabel.textContent = 'Implied value';
+    implied.appendChild(impliedLabel);
+    implied.appendChild(document.createTextNode(money(row.implied_value_usd)));
+    var badge = document.createElement('span');
+    badge.className = 'panel-rank';
+    badge.textContent = 'rank ' + row.rank;
+    implied.appendChild(badge);
+    panel.appendChild(implied);
+
+    var meta = document.createElement('p');
+    meta.className = 'panel-meta';
+    meta.textContent = categoryOf(row) + ' · ' + (row.chains || []).join(', ');
+    panel.appendChild(meta);
+
+    var facts = document.createElement('p');
+    facts.className = 'panel-meta';
+    facts.textContent = money(row.tvl_usd) + ' TVL · Age ' + age(row.age_days);
+    if (typeof row.age_days === 'number') {
+      facts.textContent = money(row.tvl_usd) + ' TVL · Age ' + Math.round(row.age_days) + ' days';
+    }
+    if (typeof row.change_7d === 'number') {
+      facts.textContent += ' · ' + pct(row.change_7d) + ' over 7 days';
+    }
+    panel.appendChild(facts);
+
+    var factorTitle = document.createElement('h3');
+    factorTitle.textContent = 'Factor breakdown';
+    panel.appendChild(factorTitle);
+
+    panel.appendChild(
+      factorBlock('Comparable multiple', row.multiple, 'Category median, shrunk toward ' + GLOBAL.toFixed(3) + '×', 'comparable', 0.6)
+    );
+    panel.appendChild(
+      factorBlock('Growth factor', row.growth_multiplier, '1 + 0.45 × tanh(' + pct(row.change_7d) + ' ÷ 30)', 'growth', 1.5)
+    );
+    panel.appendChild(
+      factorBlock('Maturity factor', row.maturity_multiplier, 'Rises with age toward 1', 'maturity', 1)
+    );
+
+    var stepsTitle = document.createElement('h3');
+    stepsTitle.textContent = 'Six step farm plan';
+    panel.appendChild(stepsTitle);
+
+    var list = document.createElement('ol');
+    list.className = 'steps';
+    (row.farm_steps || []).forEach(function (step) {
+      var li = document.createElement('li');
+      li.textContent = step;
+      list.appendChild(li);
+    });
+    panel.appendChild(list);
+
+    var foot = document.createElement('p');
+    foot.className = 'panel-foot';
+    foot.textContent =
+      'DefiLlama records no token for this protocol. That is a record, not proof: a token may exist outside it. Implied value is the radar’s own estimate.';
+    panel.appendChild(foot);
+  }
+
+  function openDetail(slug, updateUrl) {
+    var row = findRow(slug);
+    if (!row) return;
+    state.detail = slug;
+    renderDetail(row);
+    els.panel.hidden = false;
+    els.scrim.hidden = false;
+    document.body.classList.add('has-detail');
+    if (updateUrl) syncUrl();
+    var closeBtn = els.panel.querySelector('.close');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeDetail() {
+    state.detail = null;
+    els.panel.hidden = true;
+    els.scrim.hidden = true;
+    document.body.classList.remove('has-detail');
+    syncUrl();
+  }
+
+  /* ---------- URL ---------- */
+
+  function syncUrl() {
+    if (typeof window.history === 'undefined' || !window.history.replaceState) return;
+    var params = [];
+    function add(key, value) {
+      if (value) params.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
+    }
+    add('q', state.q);
+    add('category', state.category);
+    add('chain', state.chain);
+    if (state.sort !== 'implied') add('sort', state.sort);
+    if (state.watchOnly) add('watch', '1');
+    add('detail', state.detail);
+    var query = params.length ? '?' + params.join('&') : '';
+    try {
+      window.history.replaceState(null, '', window.location.pathname + query + window.location.hash);
+    } catch (err) {
+      /* a file:// document may refuse history rewrites; the view still works */
+    }
+  }
+
+  function readUrl() {
+    var params = new URLSearchParams(window.location.search);
+    state.q = params.get('q') || '';
+    state.category = params.get('category') || '';
+    state.chain = params.get('chain') || '';
+    var sort = params.get('sort');
+    if (sort) state.sort = sort;
+    state.watchOnly = params.get('watch') === '1';
+    state.detail = params.get('detail') || null;
+  }
+
+  function applyStateToControls() {
+    if (els.search) els.search.value = state.q;
+    if (els.category) els.category.value = state.category;
+    if (els.chain) els.chain.value = state.chain;
+    if (els.sort) els.sort.value = state.sort;
+    if (els.watch) els.watch.checked = state.watchOnly;
+  }
+
+  /* ---------- colophon ---------- */
+
+  function renderColophon() {
+    if (!els.colophon) return;
+    var parts = [];
+    if (DATA.board_size) parts.push(DATA.board_size + ' board rows ranked by implied value.');
+    if (DATA.early_size) parts.push(DATA.early_size + ' are early-stage protocols below the watchlist floor.');
+    if (LIVE.length) parts.push(LIVE.length + ' already-trading protocols are set aside from the board.');
+    if (DATA.floor_usd) parts.push('Watchlist floor ' + money(DATA.floor_usd) + ' TVL.');
+    parts.push('Source: ' + (DATA.source || 'DefiLlama snapshot') + '.');
+    parts.push('Model ' + (DATA.model_version || 'radar-3') + ': every figure is the radar’s estimate, not advice.');
+    els.colophon.textContent = parts.join(' ');
+  }
+
+  /* ---------- wiring ---------- */
+
+  function debounce(fn, wait) {
+    var timer = null;
+    return function () {
+      var args = arguments;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(function () {
+        fn.apply(null, args);
+      }, wait);
+    };
+  }
+
+  function bind() {
+    if (els.search) {
+      els.search.addEventListener(
+        'input',
+        debounce(function () {
+          state.q = els.search.value.trim();
+          renderBoard();
+          syncUrl();
+        }, 120)
+      );
+    }
+    if (els.category) {
+      els.category.addEventListener('change', function () {
+        state.category = els.category.value;
+        renderBoard();
+        syncUrl();
+      });
+    }
+    if (els.chain) {
+      els.chain.addEventListener('change', function () {
+        state.chain = els.chain.value;
+        renderBoard();
+        syncUrl();
+      });
+    }
+    if (els.sort) {
+      els.sort.addEventListener('change', function () {
+        state.sort = els.sort.value;
+        renderBoard();
+        syncUrl();
+      });
+    }
+    if (els.watch) {
+      els.watch.addEventListener('change', function () {
+        state.watchOnly = els.watch.checked;
+        renderBoard();
+        syncUrl();
+      });
+    }
+    if (els.scrim) {
+      els.scrim.addEventListener('click', closeDetail);
+    }
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && state.detail) closeDetail();
+    });
+  }
+
+  function init() {
+    readUrl();
+    renderHead();
+    renderFilters();
+    applyStateToControls();
+    renderStats();
+    renderBoard();
+    renderColophon();
+    bind();
+    if (state.detail) {
+      openDetail(state.detail, false);
+    }
+  }
+
+  init();
 })();
